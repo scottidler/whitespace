@@ -1,0 +1,27 @@
+[package]
+name = "whitespace"
+version = "0.1.0"
+edition = "2021"
+authors = ["Scott A. Idler"]
+build = "build.rs"
+description = "A CLI application for removing trailing whitespace"
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+colored = "3.0.0"
+dirs = "6.0.0"
+env_logger = "0.11.8"
+eyre = "0.6.12"
+log = "0.4.27"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yaml = "0.9.34"
+walkdir = "2.5.0"
+rayon = "1.10.0"
+glob = "0.3.1"
+num_cpus = "1.16.0"
+
+[dev-dependencies]
+tempfile = "3.8.1"
+
+[build-dependencies]
+# For build.rs if needed

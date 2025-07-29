@@ -1,0 +1,87 @@
+# whitespace.yml - Example configuration file
+# This file shows the available configuration options.
+# Copy to ~/.config/whitespace/whitespace.yml to customize.
+
+# File extensions to process (empty = all text files)
+file-extensions: []
+
+# Path patterns to exclude (glob patterns)
+exclude-paths:
+  - ".git/**"
+  - ".svn/**"
+  - ".hg/**"
+  - "node_modules/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+  - ".vscode/**"
+  - ".idea/**"
+  - "*.tmp/**"
+
+# Filename patterns to exclude
+exclude-files:
+  - "*.min.js"
+  - "*.min.css"
+  - "*.bundle.*"
+  - "*.lock"
+  - "*.log"
+
+# Binary file extensions to exclude (fast pre-filter)
+exclude-binary-extensions:
+  # Executables and libraries
+  - "*.exe"
+  - "*.dll"
+  - "*.so"
+  - "*.dylib"
+  - "*.a"
+  - "*.lib"
+  - "*.bin"
+  - "*.out"
+  # Archives
+  - "*.zip"
+  - "*.tar"
+  - "*.gz"
+  - "*.bz2"
+  - "*.xz"
+  - "*.7z"
+  - "*.rar"
+  # Images
+  - "*.jpg"
+  - "*.jpeg"
+  - "*.png"
+  - "*.gif"
+  - "*.bmp"
+  - "*.ico"
+  - "*.svg"
+  - "*.webp"
+  # Audio/Video
+  - "*.mp3"
+  - "*.mp4"
+  - "*.avi"
+  - "*.mov"
+  - "*.wav"
+  - "*.flac"
+  # Documents
+  - "*.pdf"
+  - "*.doc"
+  - "*.docx"
+  - "*.xls"
+  - "*.xlsx"
+  - "*.ppt"
+  - "*.pptx"
+  # Other binary formats
+  - "*.sqlite"
+  - "*.db"
+  - "*.dat"
+  - "*.pyc"
+  - "*.class"
+  - "*.jar"
+
+# Binary file detection
+binary-detection:
+  check-null-bytes: true
+  sample-size: 8192
+
+# Processing settings
+processing:
+  max-file-size: 104857600  # 100MB
