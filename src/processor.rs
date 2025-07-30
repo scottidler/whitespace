@@ -212,7 +212,6 @@ mod tests {
 
         assert!(result.had_changes);
         assert_eq!(result.lines_modified, vec![1, 2]);
-        assert_eq!(result.bytes_saved, 5);
         assert!(result.error.is_none());
 
         // File should not be modified in dry run
@@ -235,7 +234,6 @@ mod tests {
 
         assert!(result.had_changes);
         assert_eq!(result.lines_modified, vec![1, 2]);
-        assert_eq!(result.bytes_saved, 5);
         assert!(result.error.is_none());
 
         // File should be modified

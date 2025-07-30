@@ -7,16 +7,36 @@ file-extensions: []
 
 # Path patterns to exclude (glob patterns)
 exclude-paths:
+  # Version control
   - ".git/**"
   - ".svn/**"
   - ".hg/**"
+  # Dependencies and virtual environments
   - "node_modules/**"
+  - ".venv/**"
+  - "venv/**"
+  - ".env/**"
+  - "env/**"
+  - "__pycache__/**"
+  - ".tox/**"
+  - ".pytest_cache/**"
+  # Build outputs
   - "target/**"
   - "build/**"
   - "dist/**"
+  - "out/**"
+  - "bin/**"
+  - "obj/**"
+  # IDE and editor files
   - ".vscode/**"
   - ".idea/**"
+  - ".vs/**"
   - "*.tmp/**"
+  # Package managers
+  - ".npm/**"
+  - ".yarn/**"
+  - ".pnpm-store/**"
+  - "vendor/**"
 
 # Filename patterns to exclude
 exclude-files:

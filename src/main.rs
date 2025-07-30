@@ -16,6 +16,7 @@ mod walker;
 use cli::Cli;
 use config::Config;
 use engine::ParallelEngine;
+use processor::ProcessingResult;
 use walker::FileWalker;
 
 fn setup_logging() -> Result<()> {
@@ -81,12 +82,46 @@ fn format_line_numbers(lines: &[usize]) -> String {
     format!(" ({})", ranges.join(","))
 }
 
+fn display_results(file_results: &[(PathBuf, ProcessingResult)], is_dry_run: bool) -> usize {
+    let mut files_with_changes = 0;
+
+    for (file_path, result) in file_results {
+        if result.had_changes && result.error.is_none() {
+            let line_info = format_line_numbers(&result.lines_modified);
+            println!("{}{}",
+                file_path.display().to_string().blue(),
+                line_info.dimmed()
+            );
+            files_with_changes += 1;
+        }
+    }
+
+    // Display summary with colors and icons
+    if files_with_changes == 0 {
+        println!("\n{}", "✅ No trailing whitespace found".green().bold());
+    } else if is_dry_run {
+        println!("\n{} {} {}",
+            "📋".cyan(),
+            format!("{}", files_with_changes).cyan().bold(),
+            "files NOT cleaned".yellow()
+        );
+    } else {
+        println!("\n{} {} {}",
+            "🧹".green(),
+            format!("{}", files_with_changes).cyan().bold(),
+            "files cleaned".green().bold()
+        );
+    }
+
+    files_with_changes
+}
+
 fn process_directory(
     target_dir: &Path,
     config: &Arc<Config>,
     cli: &Cli,
     engine: &ParallelEngine,
-    processor: &processor::WhitespaceProcessor,
+    _processor: &processor::WhitespaceProcessor,
 ) -> Result<(usize, usize)> {
     info!("Processing directory: {}", target_dir.display());
 
@@ -103,30 +138,15 @@ fn process_directory(
 
     info!("Found {} files to process in {}", files.len(), target_dir.display());
 
-    // Process files
-    let summary = engine.process_files(files, cli.dry_run)
+            // Process files and collect results for display
+    let results = engine.process_files_with_results(files, cli.dry_run)
         .with_context(|| format!("Failed to process files in {}", target_dir.display()))?;
 
     // Display results to console for this directory
-    let mut files_with_changes = 0;
+    let files_with_changes = display_results(&results.file_results, cli.dry_run);
+    let actual_files_modified = if cli.dry_run { 0 } else { files_with_changes };
 
-    // Re-collect and process for display (always dry run for console output)
-    let files = walker.collect_files(target_dir, cli.recursive)?;
-
-    for file in &files {
-        if let Ok(result) = processor.process_file(file, true) { // Always dry run for display
-            if result.had_changes && result.error.is_none() {
-                let line_info = format_line_numbers(&result.lines_modified);
-                println!("{}{}",
-                    file.display().to_string().blue(),
-                    line_info.dimmed()
-                );
-                files_with_changes += 1;
-            }
-        }
-    }
-
-    Ok((files_with_changes, summary.files_modified))
+    Ok((files_with_changes, actual_files_modified))
 }
 
 fn run_application(cli: &Cli, config: &Config) -> Result<()> {
@@ -184,28 +204,7 @@ fn run_application(cli: &Cli, config: &Config) -> Result<()> {
         return Ok(());
     }
 
-        // Display summary with colors and icons
-    if cli.dry_run {
-        if total_files_with_changes == 0 {
-            println!("\n{}", "✅ No trailing whitespace found".green().bold());
-        } else {
-            println!("\n{} {} {}",
-                "📋".cyan(),
-                format!("{}", total_files_with_changes).cyan().bold(),
-                "files NOT cleaned".yellow()
-            );
-        }
-    } else {
-        if total_files_modified == 0 {
-            println!("\n{}", "✅ No files needed cleaning".green().bold());
-        } else {
-            println!("\n{} {} {}",
-                "🧹".green(),
-                format!("{}", total_files_modified).cyan().bold(),
-                "files cleaned".green().bold()
-            );
-        }
-    }
+            // Summary is now handled by display_results function for each directory
 
     // Log summary information
     info!("Processing completed:");

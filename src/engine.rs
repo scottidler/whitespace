@@ -16,8 +16,12 @@ pub struct ProcessingSummary {
     pub files_processed: usize,
     pub files_modified: usize,
     pub files_with_errors: usize,
-
     pub duration: Duration,
+}
+
+#[derive(Debug)]
+pub struct ProcessingResults {
+    pub file_results: Vec<(PathBuf, ProcessingResult)>,
 }
 
 impl ParallelEngine {
@@ -39,31 +43,33 @@ impl ParallelEngine {
         Ok(Self { processor })
     }
 
-    pub fn process_files(&self, files: Vec<PathBuf>, dry_run: bool) -> Result<ProcessingSummary> {
+    pub fn process_files_with_results(&self, files: Vec<PathBuf>, dry_run: bool) -> Result<ProcessingResults> {
         let start_time = Instant::now();
 
         info!("Starting parallel processing of {} files", files.len());
         debug!("Dry run mode: {}", dry_run);
 
-        // Process files in parallel
-        let results: Vec<ProcessingResult> = files
+                // Process files in parallel
+        let file_results: Vec<(PathBuf, ProcessingResult)> = files
             .par_iter()
             .map(|path| {
-                self.processor.process_file(path, dry_run)
+                let result = self.processor.process_file(path, dry_run)
                     .unwrap_or_else(|e| {
                         warn!("Failed to process {}: {}", path.display(), e);
-                                            ProcessingResult {
-                        lines_modified: vec![],
-                        had_changes: false,
-                        error: Some(format!("Processing failed: {}", e)),
-                    }
-                    })
+                        ProcessingResult {
+                            lines_modified: vec![],
+                            had_changes: false,
+                            error: Some(format!("Processing failed: {}", e)),
+                        }
+                    });
+                (path.clone(), result)
             })
             .collect();
 
         let duration = start_time.elapsed();
 
         // Aggregate results
+        let results: Vec<ProcessingResult> = file_results.iter().map(|(_, result)| result.clone()).collect();
         let summary = self.aggregate_results(results, duration);
 
         info!(
@@ -74,8 +80,12 @@ impl ParallelEngine {
             summary.duration
         );
 
-        Ok(summary)
+        Ok(ProcessingResults {
+            file_results,
+        })
     }
+
+
 
     fn aggregate_results(&self, results: Vec<ProcessingResult>, duration: Duration) -> ProcessingSummary {
         let mut files_processed = 0;
@@ -131,11 +141,14 @@ mod tests {
         let config = create_test_config();
         let engine = ParallelEngine::new(config, 2).unwrap();
 
-        let summary = engine.process_files(files.clone(), false).unwrap();
+        let results = engine.process_files_with_results(files.clone(), false).unwrap();
 
-        assert_eq!(summary.files_processed, 3);
-        assert_eq!(summary.files_modified, 3);
-        assert_eq!(summary.files_with_errors, 0);
+        let files_modified = results.file_results.iter()
+            .filter(|(_, result)| result.had_changes && result.error.is_none())
+            .count();
+
+        assert_eq!(results.file_results.len(), 3);
+        assert_eq!(files_modified, 3);
         // Files were successfully processed
 
         // Verify files were actually modified
@@ -158,10 +171,14 @@ mod tests {
         let config = create_test_config();
         let engine = ParallelEngine::new(config, 1).unwrap();
 
-        let summary = engine.process_files(vec![test_file.clone()], true).unwrap();
+        let results = engine.process_files_with_results(vec![test_file.clone()], true).unwrap();
 
-        assert_eq!(summary.files_processed, 1);
-        assert_eq!(summary.files_modified, 1);
+        let files_modified = results.file_results.iter()
+            .filter(|(_, result)| result.had_changes && result.error.is_none())
+            .count();
+
+        assert_eq!(results.file_results.len(), 1);
+        assert_eq!(files_modified, 1);
         // File was processed successfully
 
         // File should not be modified in dry run
@@ -180,10 +197,14 @@ mod tests {
         let config = create_test_config();
         let engine = ParallelEngine::new(config, 1).unwrap();
 
-        let summary = engine.process_files(vec![binary_file], false).unwrap();
+        let results = engine.process_files_with_results(vec![binary_file], false).unwrap();
 
-        assert_eq!(summary.files_processed, 1);
-        assert_eq!(summary.files_modified, 0);
+        let files_modified = results.file_results.iter()
+            .filter(|(_, result)| result.had_changes && result.error.is_none())
+            .count();
+
+        assert_eq!(results.file_results.len(), 1);
+        assert_eq!(files_modified, 0);
         // Binary file was detected and skipped
     }
 }

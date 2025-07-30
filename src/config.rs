@@ -47,16 +47,36 @@ impl Default for Config {
         Self {
             file_extensions: vec![],
             exclude_paths: vec![
+                // Version control
                 ".git/**".to_string(),
                 ".svn/**".to_string(),
                 ".hg/**".to_string(),
+                // Dependencies and virtual environments
                 "node_modules/**".to_string(),
+                ".venv/**".to_string(),
+                "venv/**".to_string(),
+                ".env/**".to_string(),
+                "env/**".to_string(),
+                "__pycache__/**".to_string(),
+                ".tox/**".to_string(),
+                ".pytest_cache/**".to_string(),
+                // Build outputs
                 "target/**".to_string(),
                 "build/**".to_string(),
                 "dist/**".to_string(),
+                "out/**".to_string(),
+                "bin/**".to_string(),
+                "obj/**".to_string(),
+                // IDE and editor files
                 ".vscode/**".to_string(),
                 ".idea/**".to_string(),
+                ".vs/**".to_string(),
                 "*.tmp/**".to_string(),
+                // Package managers
+                ".npm/**".to_string(),
+                ".yarn/**".to_string(),
+                ".pnpm-store/**".to_string(),
+                "vendor/**".to_string(),
             ],
             exclude_files: vec![
                 "*.min.js".to_string(),
