@@ -35,11 +35,75 @@ pub struct BinaryDetection {
     pub sample_size: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProcessingSettings {
-    /// Maximum file size to process (in bytes)
     pub max_file_size: u64,
+    #[serde(deserialize_with = "deserialize_threads")]
+    pub threads: usize,
+}
+
+impl<'de> Deserialize<'de> for ProcessingSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "kebab-case")]
+        enum Field {
+            MaxFileSize,
+            Threads,
+        }
+
+        struct ProcessingSettingsVisitor;
+
+        impl<'de> Visitor<'de> for ProcessingSettingsVisitor {
+            type Value = ProcessingSettings;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct ProcessingSettings")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<ProcessingSettings, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut max_file_size = None;
+                let mut threads = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::MaxFileSize => {
+                            if max_file_size.is_some() {
+                                return Err(de::Error::duplicate_field("max-file-size"));
+                            }
+                            max_file_size = Some(map.next_value()?);
+                        }
+                        Field::Threads => {
+                            if threads.is_some() {
+                                return Err(de::Error::duplicate_field("threads"));
+                            }
+                            threads = Some(deserialize_threads_value(map.next_value()?)?);
+                        }
+                    }
+                }
+
+                let max_file_size = max_file_size.unwrap_or(100 * 1024 * 1024);
+                let threads = threads.unwrap_or_else(num_cpus::get);
+
+                Ok(ProcessingSettings {
+                    max_file_size,
+                    threads,
+                })
+            }
+        }
+
+        const FIELDS: &[&str] = &["max-file-size", "threads"];
+        deserializer.deserialize_struct("ProcessingSettings", FIELDS, ProcessingSettingsVisitor)
+    }
 }
 
 impl Default for Config {
@@ -153,8 +217,36 @@ impl Default for BinaryDetection {
 impl Default for ProcessingSettings {
     fn default() -> Self {
         Self {
-            max_file_size: 104857600, // 100MB
+            max_file_size: 100 * 1024 * 1024, // 100MB
+            threads: num_cpus::get(),
         }
+    }
+}
+
+use serde::de;
+
+fn deserialize_threads_value<E>(value: serde_yaml::Value) -> Result<usize, E>
+where
+    E: de::Error,
+{
+    match value {
+        serde_yaml::Value::Number(n) => {
+            if let Some(u) = n.as_u64() {
+                if u == 0 {
+                    return Err(E::custom("threads must be greater than 0"));
+                }
+                Ok(u as usize)
+            } else {
+                Err(E::custom("threads must be a positive integer"))
+            }
+        }
+        serde_yaml::Value::String(s) => {
+            match s.as_str() {
+                "nproc" => Ok(num_cpus::get()),
+                _ => Err(E::custom(format!("invalid thread value: '{}', expected a positive integer or 'nproc'", s))),
+            }
+        }
+        _ => Err(E::custom("threads must be a positive integer or the string 'nproc'")),
     }
 }
 
@@ -195,5 +287,69 @@ impl Config {
 
         log::info!("Loaded config from: {}", path.as_ref().display());
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_threads_config_nproc() {
+        let yaml = r#"
+processing:
+  threads: nproc
+  max-file-size: 1000000
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.processing.threads, num_cpus::get());
+        assert_eq!(config.processing.max_file_size, 1000000);
+    }
+
+    #[test]
+    fn test_threads_config_numeric() {
+        let yaml = r#"
+processing:
+  threads: 8
+  max-file-size: 2000000
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.processing.threads, 8);
+        assert_eq!(config.processing.max_file_size, 2000000);
+    }
+
+    #[test]
+    fn test_threads_config_invalid_string() {
+        let yaml = r#"
+processing:
+  threads: "invalid"
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("invalid thread value"));
+    }
+
+    #[test]
+    fn test_threads_config_zero() {
+        let yaml = r#"
+processing:
+  threads: 0
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("threads must be greater than 0"));
+    }
+
+    #[test]
+    fn test_threads_config_defaults() {
+        let yaml = r#"
+processing:
+  max-file-size: 5000000
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.processing.threads, num_cpus::get());
+        assert_eq!(config.processing.max_file_size, 5000000);
     }
 }

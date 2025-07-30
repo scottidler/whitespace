@@ -105,3 +105,4 @@ binary-detection:
 # Processing settings
 processing:
   max-file-size: 104857600  # 100MB
+  threads: nproc            # Use 'nproc' for CPU count, or specify a number

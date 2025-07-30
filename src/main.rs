@@ -164,10 +164,17 @@ fn run_application(cli: &Cli, config: &Config) -> Result<()> {
     info!("Target directories: {:?}", target_dirs);
     info!("Recursive: {}", cli.recursive);
     info!("Dry run: {}", cli.dry_run);
-    info!("Threads: {}", cli.threads);
+    // Determine thread count: CLI overrides config
+    let thread_count = if cli.threads != num_cpus::get() {
+        cli.threads  // User explicitly set threads via CLI
+    } else {
+        config.processing.threads  // Use config value (which might be from YAML)
+    };
+
+    info!("Threads: {} (CLI: {}, Config: {})", thread_count, cli.threads, config.processing.threads);
 
     // Initialize components
-    let engine = ParallelEngine::new(Arc::clone(&config), cli.threads)
+    let engine = ParallelEngine::new(Arc::clone(&config), thread_count)
         .context("Failed to initialize parallel engine")?;
     let processor = processor::WhitespaceProcessor::new(Arc::clone(&config));
 
