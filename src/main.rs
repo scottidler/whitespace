@@ -98,7 +98,7 @@ fn display_results(file_results: &[(PathBuf, ProcessingResult)], is_dry_run: boo
 
     // Display summary with colors and icons
     if files_with_changes == 0 {
-        println!("\n{}", "✅ No trailing whitespace found".green().bold());
+        println!("{}", "✅ No trailing whitespace found".green().bold());
     } else if is_dry_run {
         println!("\n{} {} {}",
             "📋".cyan(),
