@@ -1,12 +1,13 @@
 use crate::config::Config;
+use crate::ports::fs::FileSystem;
 use eyre::Result;
 use log::{debug, warn};
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-pub struct WhitespaceProcessor {
+pub struct WhitespaceProcessor<F: FileSystem> {
     config: Arc<Config>,
+    fs: Arc<F>,
 }
 
 #[derive(Debug, Clone)]
@@ -16,25 +17,25 @@ pub struct ProcessingResult {
     pub error: Option<String>,
 }
 
-impl WhitespaceProcessor {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+impl<F: FileSystem> WhitespaceProcessor<F> {
+    pub fn new(config: Arc<Config>, fs: Arc<F>) -> Self {
+        Self { config, fs }
     }
 
     pub fn process_file(&self, path: &Path, dry_run: bool) -> Result<ProcessingResult> {
         debug!("Processing file: {}", path.display());
 
         // Read file content
-        let content = match fs::read(path) {
+        let content = match self.fs.read(path) {
             Ok(bytes) => bytes,
             Err(e) => {
                 let error_msg = format!("Failed to read file: {}", e);
                 warn!("{}: {}", error_msg, path.display());
-                            return Ok(ProcessingResult {
-                lines_modified: vec![],
-                had_changes: false,
-                error: Some(error_msg),
-            });
+                return Ok(ProcessingResult {
+                    lines_modified: vec![],
+                    had_changes: false,
+                    error: Some(error_msg),
+                });
             }
         };
 
@@ -67,7 +68,7 @@ impl WhitespaceProcessor {
 
         // Write back if not dry run and there are changes
         if !dry_run && had_changes {
-            if let Err(e) = fs::write(path, &processed_content) {
+            if let Err(e) = self.fs.write(path, processed_content.as_bytes()) {
                 let error_msg = format!("Failed to write file: {}", e);
                 warn!("{}: {}", error_msg, path.display());
                 return Ok(ProcessingResult {
@@ -79,11 +80,8 @@ impl WhitespaceProcessor {
             debug!("Wrote cleaned file: {}", path.display());
         }
 
-                if had_changes {
-            debug!(
-                "File processed: {} lines modified",
-                modified_lines.len()
-            );
+        if had_changes {
+            debug!("File processed: {} lines modified", modified_lines.len());
         }
 
         Ok(ProcessingResult {
@@ -93,7 +91,7 @@ impl WhitespaceProcessor {
         })
     }
 
-    fn process_content(&self, content: &str) -> (String, Vec<usize>, usize) {
+    pub fn process_content(&self, content: &str) -> (String, Vec<usize>, usize) {
         let mut processed_lines = Vec::new();
         let mut modified_line_numbers = Vec::new();
         let mut total_bytes_saved = 0;
@@ -107,7 +105,11 @@ impl WhitespaceProcessor {
                 // Line had trailing whitespace
                 modified_line_numbers.push(line_num + 1); // 1-based line numbers
                 total_bytes_saved += original_len - trimmed_len;
-                debug!("Line {}: removed {} trailing bytes", line_num + 1, original_len - trimmed_len);
+                debug!(
+                    "Line {}: removed {} trailing bytes",
+                    line_num + 1,
+                    original_len - trimmed_len
+                );
             }
 
             processed_lines.push(trimmed_line);
@@ -139,6 +141,7 @@ impl WhitespaceProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::fs::{MemFs, RealFs};
     use std::fs;
     use tempfile::TempDir;
 
@@ -149,7 +152,8 @@ mod tests {
     #[test]
     fn test_process_content_trailing_spaces() {
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let fs = Arc::new(MemFs::new());
+        let processor = WhitespaceProcessor::new(config, fs);
 
         let content = "line1   \nline2\t\t\nline3\n";
         let (processed, modified_lines, bytes_saved) = processor.process_content(content);
@@ -162,7 +166,8 @@ mod tests {
     #[test]
     fn test_process_content_no_trailing_newline() {
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let fs = Arc::new(MemFs::new());
+        let processor = WhitespaceProcessor::new(config, fs);
 
         let content = "line1   \nline2\t\t";
         let (processed, modified_lines, bytes_saved) = processor.process_content(content);
@@ -175,7 +180,8 @@ mod tests {
     #[test]
     fn test_process_content_no_changes() {
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let fs = Arc::new(MemFs::new());
+        let processor = WhitespaceProcessor::new(config, fs);
 
         let content = "line1\nline2\nline3\n";
         let (processed, modified_lines, bytes_saved) = processor.process_content(content);
@@ -188,7 +194,8 @@ mod tests {
     #[test]
     fn test_binary_detection() {
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let fs = Arc::new(MemFs::new());
+        let processor = WhitespaceProcessor::new(config, fs);
 
         let text_content = b"Hello, world!\n";
         let binary_content = b"Hello\0world\n";
@@ -198,7 +205,43 @@ mod tests {
     }
 
     #[test]
-    fn test_process_file_dry_run() {
+    fn test_process_file_with_memfs_dry_run() {
+        let config = create_test_config();
+        let original_content = b"line1   \nline2\t\t\n";
+        let fs = Arc::new(MemFs::new().with_file("test.txt", original_content));
+        let processor = WhitespaceProcessor::new(config, Arc::clone(&fs));
+
+        let result = processor.process_file(Path::new("test.txt"), true).unwrap();
+
+        assert!(result.had_changes);
+        assert_eq!(result.lines_modified, vec![1, 2]);
+        assert!(result.error.is_none());
+
+        // File should not be modified in dry run
+        let content = fs.get_content(Path::new("test.txt")).unwrap();
+        assert_eq!(content, original_content);
+    }
+
+    #[test]
+    fn test_process_file_with_memfs_actual_modification() {
+        let config = create_test_config();
+        let original_content = b"line1   \nline2\t\t\n";
+        let fs = Arc::new(MemFs::new().with_file("test.txt", original_content));
+        let processor = WhitespaceProcessor::new(config, Arc::clone(&fs));
+
+        let result = processor.process_file(Path::new("test.txt"), false).unwrap();
+
+        assert!(result.had_changes);
+        assert_eq!(result.lines_modified, vec![1, 2]);
+        assert!(result.error.is_none());
+
+        // File should be modified
+        let content = fs.get_content(Path::new("test.txt")).unwrap();
+        assert_eq!(content, b"line1\nline2\n");
+    }
+
+    #[test]
+    fn test_process_file_dry_run_with_real_fs() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.txt");
 
@@ -206,7 +249,8 @@ mod tests {
         fs::write(&test_file, original_content).unwrap();
 
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let real_fs = Arc::new(RealFs);
+        let processor = WhitespaceProcessor::new(config, real_fs);
 
         let result = processor.process_file(&test_file, true).unwrap();
 
@@ -220,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_file_actual_modification() {
+    fn test_process_file_actual_modification_with_real_fs() {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.txt");
 
@@ -228,7 +272,8 @@ mod tests {
         fs::write(&test_file, original_content).unwrap();
 
         let config = create_test_config();
-        let processor = WhitespaceProcessor::new(config);
+        let real_fs = Arc::new(RealFs);
+        let processor = WhitespaceProcessor::new(config, real_fs);
 
         let result = processor.process_file(&test_file, false).unwrap();
 

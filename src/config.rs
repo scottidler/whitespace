@@ -1,3 +1,4 @@
+use crate::cli::Cli;
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -94,10 +95,7 @@ impl<'de> Deserialize<'de> for ProcessingSettings {
                 let max_file_size = max_file_size.unwrap_or(100 * 1024 * 1024);
                 let threads = threads.unwrap_or_else(num_cpus::get);
 
-                Ok(ProcessingSettings {
-                    max_file_size,
-                    threads,
-                })
+                Ok(ProcessingSettings { max_file_size, threads })
             }
         }
 
@@ -240,12 +238,13 @@ where
                 Err(E::custom("threads must be a positive integer"))
             }
         }
-        serde_yaml::Value::String(s) => {
-            match s.as_str() {
-                "nproc" => Ok(num_cpus::get()),
-                _ => Err(E::custom(format!("invalid thread value: '{}', expected a positive integer or 'nproc'", s))),
-            }
-        }
+        serde_yaml::Value::String(s) => match s.as_str() {
+            "nproc" => Ok(num_cpus::get()),
+            _ => Err(E::custom(format!(
+                "invalid thread value: '{}', expected a positive integer or 'nproc'",
+                s
+            ))),
+        },
         _ => Err(E::custom("threads must be a positive integer or the string 'nproc'")),
     }
 }
@@ -255,8 +254,7 @@ impl Config {
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
         // If explicit config path provided, try to load it
         if let Some(path) = config_path {
-            return Self::load_from_file(path)
-                .context(format!("Failed to load config from {}", path.display()));
+            return Self::load_from_file(path).context(format!("Failed to load config from {}", path.display()));
         }
 
         // Try primary location: ~/.config/whitespace/whitespace.yml
@@ -279,11 +277,9 @@ impl Config {
     }
 
     fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(&path)
-            .context("Failed to read config file")?;
+        let content = fs::read_to_string(&path).context("Failed to read config file")?;
 
-        let config: Self = serde_yaml::from_str(&content)
-            .context("Failed to parse config file")?;
+        let config: Self = serde_yaml::from_str(&content).context("Failed to parse config file")?;
 
         log::info!("Loaded config from: {}", path.as_ref().display());
         Ok(config)
@@ -351,5 +347,109 @@ processing:
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.processing.threads, num_cpus::get());
         assert_eq!(config.processing.max_file_size, 5000000);
+    }
+}
+
+/// Runtime configuration that merges CLI arguments with file-based config.
+/// This is the validated, ready-to-use configuration for the application.
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    /// Target directories to process
+    pub directories: Vec<PathBuf>,
+    /// Whether to perform a dry run
+    pub dry_run: bool,
+    /// Whether to process recursively
+    pub recursive: bool,
+    /// Number of threads to use
+    pub threads: usize,
+    /// File-based configuration (exclude patterns, etc.)
+    pub file_config: Config,
+}
+
+impl RuntimeConfig {
+    /// Create RuntimeConfig by merging CLI args with file config.
+    pub fn from_cli(cli: &Cli) -> Result<Self> {
+        // Load file-based config
+        let file_config = Config::load(cli.config.as_ref()).context("Failed to load configuration file")?;
+
+        // Determine target directories
+        let directories = if cli.directories.is_empty() {
+            vec![PathBuf::from(".")]
+        } else {
+            cli.directories.clone()
+        };
+
+        // Determine thread count: CLI overrides file config if explicitly set
+        let threads = if cli.threads != num_cpus::get() {
+            cli.threads // User explicitly set threads via CLI
+        } else {
+            file_config.processing.threads // Use file config value
+        };
+
+        // Validate thread count
+        if threads == 0 {
+            eyre::bail!("Thread count must be greater than 0");
+        }
+
+        Ok(Self {
+            directories,
+            dry_run: cli.dry_run,
+            recursive: cli.recursive,
+            threads,
+            file_config,
+        })
+    }
+}
+
+#[cfg(test)]
+mod runtime_config_tests {
+    use super::*;
+
+    fn default_cli() -> Cli {
+        Cli {
+            directories: vec![],
+            config: None,
+            dry_run: false,
+            verbose: false,
+            recursive: true,
+            threads: num_cpus::get(),
+        }
+    }
+
+    #[test]
+    fn test_runtime_config_default_directory() {
+        let cli = default_cli();
+        let config = RuntimeConfig::from_cli(&cli).unwrap();
+        assert_eq!(config.directories, vec![PathBuf::from(".")]);
+    }
+
+    #[test]
+    fn test_runtime_config_explicit_directories() {
+        let cli = Cli {
+            directories: vec![PathBuf::from("/tmp"), PathBuf::from("/var")],
+            ..default_cli()
+        };
+        let config = RuntimeConfig::from_cli(&cli).unwrap();
+        assert_eq!(config.directories.len(), 2);
+    }
+
+    #[test]
+    fn test_runtime_config_dry_run() {
+        let cli = Cli {
+            dry_run: true,
+            ..default_cli()
+        };
+        let config = RuntimeConfig::from_cli(&cli).unwrap();
+        assert!(config.dry_run);
+    }
+
+    #[test]
+    fn test_runtime_config_threads_from_cli() {
+        let cli = Cli {
+            threads: 4,
+            ..default_cli()
+        };
+        let config = RuntimeConfig::from_cli(&cli).unwrap();
+        assert_eq!(config.threads, 4);
     }
 }
